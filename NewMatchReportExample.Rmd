@@ -1,0 +1,435 @@
+---
+title: "Match Report - Team Vs Opposition"
+output: html_document
+date: "Date"
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(htmlwidgets)
+library(hms)
+library(readxl)
+library(condformat)
+
+
+round_mean <- function(x) {
+  round(mean(x), digits = 0) 
+}
+
+round_mean2 <- function(x) {
+  round(mean(x), digits = 1)  
+}
+
+setwd("Datalocation")
+datadump<-suppressWarnings(read_xlsx("GPS - Database - Heart Rate.xlsx",sheet=1))
+sched<-read.csv("Schedule.csv")
+sched$active_days<- as.Date(sched$active_days, format = "%d/%m/%Y")
+datadump$`Total Time`<-as.numeric(as_hms(datadump$`Total Time`))/60
+datadump$`Session Date`<-as.Date(datadump$`Session Date`)
+datadump$`Total Distance`<-round(datadump$`Total Distance`,digits=0)
+datadump$`Player Position` <- factor(datadump$`Player Position`, levels = c("Prop","Hooker","Second Row","Back Row","Scrum Half","Out Half","Centre","Back Three"))
+
+datadump$PositionGroup<-ifelse(datadump$`Player Position` %in% c("Prop","Hooker","Back Row","Second Row"),"Forward","Back")
+colnames(datadump)[colnames(datadump) == "Total Distance"] <- "Total Distance"
+colnames(datadump)[colnames(datadump) == "Player Name"] <- "Name"
+colnames(datadump)[colnames(datadump) == "HML Distance"] <- "HMLD"
+colnames(datadump)[colnames(datadump) == "Position"] <- "Position2"
+colnames(datadump)[colnames(datadump) == "Player Position"] <- "Position"
+colnames(datadump)[colnames(datadump) == "High Speed Running (Relative)"] <- "VHSR >70%"
+colnames(datadump)[colnames(datadump) == "Accelerations"] <- "Accels"
+colnames(datadump)[colnames(datadump) == "% Accel GD"] <- "Accels old"
+colnames(datadump)[colnames(datadump) == "Accels GD"] <- "Accels old2"
+colnames(datadump)[colnames(datadump) == "VHSR GD"] <- "VHSR old2"
+colnames(datadump)[colnames(datadump) == "% VHSR GD"] <- "VHSR old"
+
+
+datadump$MMin<-round(datadump$`Total Distance`/datadump$`Total Time`,digits=1)
+datadump$HMLMin<-round(datadump$`HMLD`/datadump$`Total Time`,digits=1)
+datadump$AccelMin<-round(datadump$Accels/datadump$`Total Time`,digits=1)
+datadump$VHSRMin<-round(datadump$`VHSR >70%`/datadump$`Total Time`,digits=1)
+datadump$Initials <- sapply(strsplit(datadump$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+datadump$`VHSR >70%`<-round(datadump$`VHSR >70%`,digits=0)
+datadump$HMLD<-round(datadump$HMLD,digits=0)
+datadump<-subset(datadump,datadump$`Session Date`>"2024-07-28") # season start date
+datadump <- merge(datadump, sched, by.x = "Session Date", by.y = "active_days", all.x = TRUE)
+training<-subset(datadump,grepl("2026-05-30",datadump$`Session Date`)) # date of match
+#training<-subset(datadump,grepl(Sys.Date(),datadump$`Session Date`)) # can use if analysing same day
+
+
+
+trainingfull<-subset(training,grepl("Match - 1st Half",training$`Drill Title`,ignore.case = TRUE)|grepl("Match - 2nd Half",training$`Drill Title`,ignore.case = TRUE) )
+
+matchsumtoday<-trainingfull %>%
+  group_by(Name,`Session Date`) %>%
+  dplyr::summarise(Position=Position,
+                   PositionGroup=PositionGroup,
+                   `Total Distance`=sum(`Total Distance`),
+                   HMLD=sum(HMLD),
+                   Accels =sum(Accels),
+                   `VHSR >70%` =sum(`VHSR >70%`),
+                   MMin=mean(MMin),
+                   HMLMin=mean(HMLMin),
+                   AccelMin=mean(AccelMin),
+                   VHSRMin=mean(VHSRMin),
+                   total_time=sum(`Total Time`))
+matchsumtoday<-unique(matchsumtoday)
+```
+
+
+## Total Game Summary
+Colour code based on average game.
+
+Colour code - <80% blue, 80-120% green 120%+ red
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+rowdata <- matchsumtoday %>%
+  group_by(PositionGroup) %>%
+  dplyr::summarize(HMLD=round(mean(HMLD,na.rm=TRUE),digit=0),
+                    Accels=round(mean(Accels,na.rm=TRUE),digit=0),
+                    `VHSR >70%`=round(mean(`VHSR >70%`,na.rm=TRUE),digit=0))
+
+my.data <- as.data.frame(rowdata)
+
+daydata<-subset(datadump, grepl("Match - 1st Half",datadump$`Drill Title`,ignore.case = TRUE)|grepl("Match - 2nd Half",datadump$`Drill Title`,ignore.case = TRUE)|grepl("Match - 3rd Half",datadump$`Drill Title`,ignore.case = TRUE))
+
+daydata<-daydata %>%
+  group_by(Name,`Session Date`) %>%
+  dplyr::summarise(Position=Position,
+                   PositionGroup=PositionGroup,
+                   `Total Distance`=sum(`Total Distance`),
+                   HMLD=sum(HMLD),
+                   Accels =sum(Accels),
+                   `VHSR >70%` =sum(`VHSR >70%`),
+                   MMin=mean(MMin),
+                   HMLMin=mean(HMLMin),
+                   AccelMin=mean(AccelMin),
+                   VHSRMin=mean(VHSRMin),
+                   total_time=sum(`Total Time`))
+daydata<-unique(daydata)
+
+dayreference <- daydata %>%
+  group_by(PositionGroup) %>%
+  dplyr::summarize(HMLDnorm=round(mean(HMLD,na.rm=TRUE),digit=0),
+                    Accelsnorm=round(mean(Accels,na.rm=TRUE),digit=0),
+                    VHSRnorm=round(mean(`VHSR >70%`,na.rm=TRUE),digit=0))
+
+my.data<-cbind(my.data,dayreference[,c(2:4)])
+my.data$HMLDPercent<-100*round(my.data$HMLD/my.data$HMLDnorm,digit=2)
+my.data$AccelPercent<-100*round(my.data$Accels/my.data$Accelsnorm,digit=2)
+my.data$VHSRPercent<-100*round(my.data$`VHSR >70%`/my.data$VHSRnorm,digit=2)
+
+color.picker1 <- function(z){
+  if(is.na(z)){return(0)}
+  else if(z <= 80){return(1)}
+  else if( z > 80 & z < 120){return(2)}
+  else {return(3)}
+}
+
+a<-condformat(my.data) %>%
+  rule_fill_discrete(HMLD, expression = sapply(my.data$HMLDPercent,
+                                                color.picker1),colours=c("0" = "white", "1" = "navy", 
+                                                                          "2" =  "lightgreen", "3" = "darkred"))
+
+b<-a %>%rule_fill_discrete(`VHSR >70%`, expression = sapply(my.data$VHSRPercent,
+                                                          color.picker1),colours=c("0" = "white", "1" = "navy", 
+                                                                                   "2" =  "lightgreen", "3" = "darkred")) 
+
+c<-b %>%
+  rule_fill_discrete(Accels, expression = sapply(my.data$AccelPercent,
+                                                      color.picker1),colours=c("0" = "white", "1" = "navy",  "2" =  "lightgreen", "3" = "darkred")) 
+
+c[,c(1:4)]
+```
+
+# Versus Average Game - Volume
+Comparison to average game for the position group, volume is based on playing over 65 minutes. 
+
+Colour code - <80% blue, 80-120% green 120%+ red
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+
+#### session versus game ####
+match<-subset(datadump,grepl("Match - 1st Half",datadump$`Drill Title`,ignore.case = TRUE)|grepl("Match - 2nd Half",datadump$`Drill Title`,ignore.case = TRUE))
+
+
+matchsum<-match %>%
+  group_by(Name,`Session Date`) %>%
+  dplyr::summarise(Position=Position,
+                   `Total Distance`=sum(`Total Distance`),
+                   HMLD=sum(HMLD),
+                   Accels =sum(Accels),
+                   `VHSR >70%` =sum(`VHSR >70%`),
+                   MMin=mean(MMin),
+                   HMLMin=mean(HMLMin),
+                   AccelMin=mean(AccelMin),
+                   VHSRMin=mean(VHSRMin),
+                   total_time=sum(`Total Time`))
+
+matchsum<-subset(matchsum,matchsum$total_time>65) # use matches with more than 65 minutes, this can be amended dependent on sport etc.
+
+
+ma <- matchsum %>%
+  group_by(`Position`) %>%
+  dplyr::summarise(across(c("HMLMin","AccelMin","VHSRMin","HMLD","Accels",`VHSR >70%`),mean,na.rm=TRUE))
+
+colnames(ma)[2:7]<-paste(colnames(ma)[2:7],"GD")
+
+trainingteam<-matchsumtoday
+sgame<-merge(trainingteam,ma,by= "Position")
+### repeat for volume ###
+sgame$"% HMLD GD"<-round(100*(sgame$HMLD/sgame$`HMLD GD`),digits=0)
+sgame$"% Accel GD"<-round(100*(sgame$Accels/sgame$`Accels GD`),digits=0)
+sgame$"% VHSR GD"<-round(100*(sgame$`VHSR >70%`/sgame$`VHSR >70% GD`),digits=0)
+sgame$Initials <- sapply(strsplit(sgame$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+
+#sgame$fill_color <- ifelse(summary_stats$mean < 0, "navy", "darkred")
+
+metricnumber3<-c(20,21,22)## position in table of metrics, this can changed to index of the metric name if prefered
+metricnumber3<-as.data.frame(metricnumber3)
+metricnumber3$MetricName<-c("% HMLD GD","% Accel GD","% VHSR GD")
+
+plot_list3 <- list()
+
+# Iterate over each metric
+for (i in metricnumber3[, 1]) {
+  metric_name <- metricnumber3$MetricName[metricnumber3$metricnumber3 == i]  
+  
+  # Calculate mean and standard deviation for each PositionGroup
+  summary_stats <- sgame %>%
+    group_by(Position) %>%
+    dplyr::summarize(Mean = round(mean(.data[[colnames(sgame)[i]]], na.rm = TRUE),digits=0),
+              sd = sd(.data[[colnames(sgame)[i]]], na.rm = TRUE))
+  means<-sgame %>%
+    group_by(PositionGroup)%>%
+    dplyr::summarize(Mean=round(mean(.data[[colnames(sgame)[i]]],na.rm=TRUE),digits = 0))
+  forward <- subset(means, PositionGroup == "Forward")
+  back <- subset(means, PositionGroup == "Back")
+  colnames(back)[2]<-"Backs Mean"
+  colnames(forward)[2]<-"Forwards Mean"
+  max_abs <- max(abs(c(min(sgame[[names(sgame)[i]]]), max(sgame[[names(sgame)[i]]]))))
+  summary_stats$fill_color <- ifelse(summary_stats$Mean < 80, "navy",ifelse(summary_stats$Mean>=80 & summary_stats$Mean<120, "lightgreen","darkred"))
+  a <- ggplot(data = sgame, aes(x = Position, y = .data[[names(sgame)[i]]])) +
+    geom_bar(stat = "summary", position = "dodge", fun = round_mean,fill=summary_stats$fill_color) +
+    geom_text(aes(label = Initials, color=as.factor(Name),Name=Name),  
+              vjust = -0.5) +
+    xlab("") +
+    scale_color_manual(labels = c("My Line 1", "My Line 2"),
+                       values = c("Line 1" = "blue", "Line 2" = "red"))+
+    ylab(paste(metric_name)) +
+    scale_y_continuous(labels = function(x) paste0(x, "%"))+
+    theme(
+      legend.title = element_blank(),
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      text = element_text(size = 16)
+    )
+  
+  # b <- ggplotly(a,tooltip=c("Name","Position","Swaps",paste(colnames(sgame)[i]))) %>% layout(legend = list(title = NULL))  # Remove legend title
+  b <- ggplotly(a, tooltip = c("Mean","Name", "Position","Forwards Mean", "Backs Mean", paste(colnames(sgame)[i]))) %>%
+    layout(legend = list(title = NULL),
+           hovermode = "closest",
+           hoverlabel = list(font = list(color = "white")),
+           pointmeta = list(text = paste(colnames(sgame)[i])))
+  #b$x$data[[2]]$hoverinfo <- "none"
+  
+  plot_list3[[length(plot_list3) + 1]] <- b
+}
+
+
+# Combine the plots into a single Plotly object
+combined_plotsg <- subplot(plot_list3, nrows=1, shareX = FALSE, shareY = FALSE,titleY = TRUE,margin=0.05)
+
+# Customize legend settings
+combined_plotsg <- combined_plotsg %>% layout(
+  legend = list(
+    traceorder = "normal",  # Ensure the order of legend items is consistent
+    font = list(color = "black"),  # Customize legend font color
+    bgcolor = "white",  # Set legend background color
+    bordercolor = "white",  # Set legend border color
+    borderwidth = 1  # Set legend border width
+  )
+)
+
+# Display the combined plot for session compared to game 
+combined_plotsg
+
+```
+# Versus Average Game - Intensity
+Comparison to average game for the position group, the intensity based on 40 minute half.
+
+Colour code - <80% blue, 80-120% green 120%+ red
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+matchfirsthalf<-match<-subset(datadump,grepl("Match - 1st Half",datadump$`Drill Title`))
+matchfirsthalf<-subset(matchfirsthalf,matchfirsthalf$`Total Time`>40)
+matchsum<-matchfirsthalf %>%
+  group_by(Name,`Session Date`) %>%
+  dplyr::summarise(Position=Position,
+                   `Total Distance`=sum(`Total Distance`),
+                   HMLD=sum(HMLD),
+                   Accels =sum(Accels),
+                   `VHSR >70%` =sum(`VHSR >70%`),
+                   MMin=mean(MMin),
+                   HMLMin=mean(HMLMin),
+                   AccelMin=mean(AccelMin),
+                   VHSRMin=mean(VHSRMin),
+                   total_time=sum(`Total Time`))
+
+
+ma <- matchsum %>%
+  group_by(`Position`) %>%
+  dplyr::summarise(across(c("HMLMin","AccelMin","VHSRMin","HMLD","Accels",`VHSR >70%`),mean,na.rm=TRUE))
+
+colnames(ma)[2:7]<-paste(colnames(ma)[2:7],"GD")
+
+trainingteam<-matchsumtoday
+
+sgame<-merge(trainingteam,ma,by= "Position")
+
+
+sgame$"% HMLD/Min GD"<-round(100*(sgame$HMLMin/sgame$`HMLMin GD`)-100,digits=0)
+sgame$"% Accel/Min GD"<-round(100*(sgame$AccelMin/sgame$`AccelMin GD`)-100,digits=0)
+sgame$"% VHSR/Min GD"<-round(100*(sgame$VHSRMin/sgame$`VHSRMin GD`)-100,digits=0)
+sgame$Initials <- sapply(strsplit(sgame$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+#sgame$fill_color <- ifelse(summary_stats$mean < 0, "navy", "darkred")
+
+metricnumber3<-c(20,21,22)## position in table of metrics, this can changed to index of the metric name if prefered
+metricnumber3<-as.data.frame(metricnumber3)
+metricnumber3$MetricName<-c("% HMLD/Min GD","% Accel/Min GD","% VHSR/Min GD")
+
+plot_list3 <- list()
+
+# Iterate over each metric
+for (i in metricnumber3[, 1]) {
+  metric_name <- metricnumber3$MetricName[metricnumber3$metricnumber3 == i]  
+  
+  # Calculate mean and standard deviation for each PositionGroup
+  summary_stats <- sgame %>%
+    group_by(Position) %>%
+    dplyr::summarize(Mean = round(mean(.data[[colnames(sgame)[i]]], na.rm = TRUE),digits=0),
+              sd = sd(.data[[colnames(sgame)[i]]], na.rm = TRUE))
+  means<-sgame %>%
+    group_by(PositionGroup)%>%
+    dplyr::summarize(Mean=round(mean(.data[[colnames(sgame)[i]]],na.rm=TRUE),digits = 0))
+  forward <- subset(means, PositionGroup == "Forward")
+  back <- subset(means, PositionGroup == "Back")
+  colnames(back)[2]<-"Backs Mean"
+  colnames(forward)[2]<-"Forwards Mean"
+  max_abs <- max(abs(c(min(sgame[[names(sgame)[i]]]), max(sgame[[names(sgame)[i]]]))))
+  summary_stats$fill_color <- ifelse(summary_stats$Mean <= -20, "navy",ifelse(summary_stats$Mean>-20 & summary_stats$Mean<20,"lightgreen", "darkred"))
+  a <- ggplot(data = sgame, aes(x = Position, y = .data[[names(sgame)[i]]])) +
+    geom_bar(stat = "summary", position = "dodge", fun = round_mean,fill=summary_stats$fill_color) +
+    geom_text(aes(label = Initials, color=as.factor(Name),Name=Name),  
+              vjust = -0.5) +
+    xlab("") +
+    scale_color_manual(labels = c("My Line 1", "My Line 2"),
+                       values = c("Line 1" = "blue", "Line 2" = "red"))+
+    ylab(paste(metric_name)) +
+    scale_y_continuous(labels = function(x) paste0(x, "%"),limits=c(-max_abs, max_abs))+
+    theme(
+      legend.title = element_blank(),
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      text = element_text(size = 16)
+    )
+  
+  # b <- ggplotly(a,tooltip=c("Name","Position","Swaps",paste(colnames(sgame)[i]))) %>% layout(legend = list(title = NULL))  # Remove legend title
+  b <- ggplotly(a, tooltip = c("Mean","Name", "Position","Forwards Mean", "Backs Mean", paste(colnames(sgame)[i])),visible=legendonly) %>%
+    layout(legend = list(title = NULL),
+           hovermode = "closest",
+           hoverlabel = list(font = list(color = "white")),
+           pointmeta = list(text = paste(colnames(sgame)[i])))
+  #b$x$data[[2]]$hoverinfo <- "none"
+  
+  plot_list3[[length(plot_list3) + 1]] <- b
+}
+
+
+# Combine the plots into a single Plotly object
+combined_plotsg <- subplot(plot_list3, nrows=1, shareX = FALSE, shareY = FALSE,titleY = TRUE,margin=0.05)
+
+# Customize legend settings
+combined_plotsg <- combined_plotsg %>% layout(
+  legend = list(
+    traceorder = "normal",  # Ensure the order of legend items is consistent
+    font = list(color = "black"),  # Customize legend font color
+    bgcolor = "white",  # Set legend background color
+    bordercolor = "white",  # Set legend border color
+    borderwidth = 1  # Set legend border width
+  )
+)
+
+# Display the combined plot for session compared to game 
+combined_plotsg
+
+```
+# Individual Summary 
+This is a player compared to their own game average. 
+
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+dayreference <- daydata %>%
+  group_by(Name) %>%
+  dplyr::summarize(HMLDnorm=round(mean(HMLD,na.rm=TRUE),digit=0),
+                    Accelsnorm=round(mean(Accels,na.rm=TRUE),digit=0),
+                    VHSRnorm=round(mean(`VHSR >70%`,na.rm=TRUE),digit=0))
+
+my.data<-merge(matchsumtoday,dayreference, by="Name")
+my.data$HMLDPercent<-round(100*(my.data$HMLD/my.data$HMLDnorm)-100,digit=0)
+my.data$AccelPercent<-round(100*(my.data$Accels/my.data$Accelsnorm)-100,digit=0)
+my.data$VHSRPercent<-round(100*(my.data$`VHSR >70%`/my.data$VHSRnorm)-100,digit=0)
+my.data$HMLD<-round(my.data$HMLD,digits=0)
+
+ make_plot <- function(data, percent_col, value_col, y_label) {
+
+  max_abs <- max(abs(c(min(data[[percent_col]], na.rm = TRUE),
+                       max(data[[percent_col]], na.rm = TRUE))))
+
+  # Create category with FIXED levels
+  fill_cat <- cut(data[[percent_col]],
+                  breaks = c(-Inf, -20, 20, Inf),
+                  labels = c("low", "normal", "high"))
+
+  fill_cat <- factor(fill_cat, levels = c("low", "normal", "high"))
+
+  p <- ggplot(data,
+              aes(x = reorder(Name, -data[[percent_col]]),
+                  y = data[[percent_col]],
+                  fill = fill_cat)) +
+
+    geom_bar(stat = "summary", fun = round_mean, position = "dodge") +
+
+    scale_fill_manual(values = c(
+      "low" = "navy",
+      "normal" = "lightgreen",
+      "high" = "darkred"
+    ), drop = FALSE) +   
+
+    scale_y_continuous(labels = function(x) paste0(x, "%"),
+                       limits = c(-max_abs, max_abs)) +
+
+    xlab("") +
+    ylab(y_label) +
+
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      text = element_text(size = 16)
+    )
+
+  ggplotly(p, tooltip = c("Name", value_col)) %>%
+    layout(
+      legend = list(title = NULL),
+      hovermode = "closest",
+      hoverlabel = list(font = list(color = "white"))
+    )
+}
+b <- make_plot(my.data, "HMLDPercent", "HMLD", "HMLD")
+b
+
+b <- make_plot(my.data, "AccelPercent", "Accels", "Accels")
+b
+
+b <- make_plot(my.data, "VHSRPercent", "VHSR >70%", "VHSR")
+b
+```

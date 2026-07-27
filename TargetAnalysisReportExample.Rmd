@@ -1,0 +1,454 @@
+---
+title: "PlayerTargets"
+author: "Georgia Scott"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+Colour scheme can be changed, numbers and colours:
+80% > Green
+60% > Light Blue
+60% < Amber
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(htmlwidgets)
+library(hms)
+library(readxl)
+library(condformat)
+setwd("DataLocation")
+
+squad<-read_xlsx("SquadList202627.xlsx",sheet=1)
+squad$PositionGroup2 <- ifelse(squad$Position %in% c("Prop", "Hooker"), "FR",
+                               ifelse(squad$Position %in% c("Second Row"), "SR",
+                                      ifelse(squad$Position %in% c("Back Row"), "BR",
+                                             ifelse(squad$Position %in% c("Scrum Half", "Out Half"), "HB",
+                                                    ifelse(squad$Position %in% c( "Back Three"), "OB",
+                                                           ifelse(squad$Position %in% c("Centre"),"CC",""))))))
+
+round_mean <- function(x) {
+  round(mean(x), digits = 0) 
+}
+
+round_mean2 <- function(x) {
+  round(mean(x), digits = 1)  
+}
+datadump<-suppressWarnings(read_xlsx("GPS - Database - Heart Rate.xlsx",sheet=1))
+sched<-read.csv("Schedule.csv")
+sched$active_days<- as.Date(sched$active_days, format = "%d/%m/%Y")
+datadump$`Total Time`<-as.numeric(as_hms(datadump$`Total Time`))/60
+datadump$`Session Date`<-as.Date(datadump$`Session Date`)
+datadump$`Total Distance`<-round(datadump$`Total Distance`,digits=0)
+datadump$`Player Position` <- factor(datadump$`Player Position`, levels = c("Prop","Hooker","Second Row","Back Row","Scrum Half","Out Half","Centre","Back Three"))
+
+datadump$PositionGroup<-ifelse(datadump$`Player Position` %in% c("Prop","Hooker","Back Row","Second Row"),"Forward","Back")
+colnames(datadump)[colnames(datadump) == "Total Distance"] <- "Total Distance"
+colnames(datadump)[colnames(datadump) == "Player Name"] <- "Name"
+colnames(datadump)[colnames(datadump) == "HML Distance"] <- "HMLD"
+colnames(datadump)[colnames(datadump) == "Position"] <- "Position2"
+colnames(datadump)[colnames(datadump) == "Player Position"] <- "Position"
+colnames(datadump)[colnames(datadump) == "High Speed Running (Relative)"] <- "VHSR >70%"
+colnames(datadump)[colnames(datadump) == "Accelerations"] <- "Accels"
+colnames(datadump)[colnames(datadump) == "% Accel GD"] <- "Accels old"
+colnames(datadump)[colnames(datadump) == "Accels GD"] <- "Accels old2"
+colnames(datadump)[colnames(datadump) == "VHSR GD"] <- "VHSR old2"
+colnames(datadump)[colnames(datadump) == "% VHSR GD"] <- "VHSR old"
+
+datadump$PositionGroup2 <- ifelse(datadump$Position %in% c("Prop", "Hooker"), "FR",
+                               ifelse(datadump$Position %in% c("Second Row"), "SR",
+                                      ifelse(datadump$Position %in% c("Back Row"), "BR",
+                                             ifelse(datadump$Position %in% c("Scrum Half", "Out Half"), "HB",
+                                                    ifelse(datadump$Position %in% c( "Back Three"), "OB",
+                                                           ifelse(datadump$Position %in% c("Centre"),"CC",""))))))
+
+datadump$MMin<-round(datadump$`Total Distance`/datadump$`Total Time`,digits=1)
+datadump$HMLMin<-round(datadump$`HMLD`/datadump$`Total Time`,digits=1)
+datadump$AccelMin<-round(datadump$Accels/datadump$`Total Time`,digits=1)
+datadump$VHSRMin<-round(datadump$`VHSR >70%`/datadump$`Total Time`,digits=1)
+datadump$Initials <- sapply(strsplit(datadump$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+datadump$`VHSR >70%`<-round(datadump$`VHSR >70%`,digits=0)
+datadump$HMLD<-round(datadump$HMLD,digits=0)
+datadump<-subset(datadump,datadump$Season=="2025/26")
+datadump <- merge(datadump, sched, by.x = "Session Date", by.y = "active_days", all.x = TRUE)
+training<-subset(datadump,grepl(Sys.Date(),datadump$`Session Date`))
+
+trainingtotal<-subset(training,training$`Drill Title`=="Rugby - Full Session"|training$`Drill Title`=="Rugby - Extras")
+trainingtotalweek<-subset(datadump,datadump$`Drill Title`=="Rugby - Full Session"|datadump$`Drill Title`=="Rugby - Extras")
+
+load<-read.csv("LoadPlanningInReport.csv") ## load planner data
+load<-load[,-1]
+
+```
+### Weekly Targets Totals ####
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+week<- subset(load,load$Week == load$Week[load$Date == Sys.Date()])
+target_week <- unique(week$Week)
+if (length(target_week) == 1) {
+  sofar <- trainingtotalweek[trainingtotalweek$`Session Week Number` == target_week, ]
+} else {
+  warning("Date matched multiple or no week numbers.")
+}
+sofar<-sofar[c("Name", "HMLD","VHSR >70%","PositionGroup2")]
+sofar<-sofar%>%
+  group_by(Name,PositionGroup2)%>%
+  dplyr::summarise(HMLD=sum(HMLD),VHSR=sum(`VHSR >70%`), .groups = "drop")
+
+hmldbefore <- week[week$Date <= Sys.Date(), ]
+
+hmldweekneededsofar<-hmldbefore %>%
+  group_by(Position) %>%
+  dplyr::summarise(HMLDneeded=sum(HMLD),VHSRneeded=sum(VHSR))
+
+playersleft<-merge(hmldweekneededsofar,sofar,by.x="Position",by.y = "PositionGroup2")
+playersleft$differenceHMLD<-playersleft$HMLDneeded-playersleft$HMLD
+playersleft$differenceVHSR<-playersleft$VHSRneeded-playersleft$VHSR
+
+daysafter <- length(unique(week$Date[week$Date >= Sys.Date() & week$HMLD != 0]))
+playersleft$differenceperdayHMLD<-playersleft$differenceHMLD/daysafter
+playersleft$differenceperdayVHSR<-playersleft$differenceVHSR/daysafter
+weeklylloads<- week %>%
+  group_by(Position)%>%
+  dplyr::summarise(hmldsum=sum(HMLD)+900,vhsr=sum(VHSR)) ### add 900 here
+playerleftweek<-merge(playersleft,weeklylloads,by="Position")
+playerleftweek<-playerleftweek[,c(4,1,5,6,2,3,11,12)]
+colnames(playerleftweek)<-c("Name","Position","HMLD So Far","VHSR So Far","HMLD Target So Far","VHSR Target So Far","HMLD Target Week","VHSR Target Week")
+playerleftweek$`% of HMLD So Far`<-playerleftweek$`HMLD So Far`/playerleftweek$`HMLD Target So Far`
+playerleftweek$`% of VHSR So Far`<-playerleftweek$`VHSR So Far`/playerleftweek$`VHSR Target So Far`
+playerleftweek$`% of HMLD Week`<-playerleftweek$`HMLD So Far`/(playerleftweek$`HMLD Target Week`+900)### add 900 here
+playerleftweek$`% of VHSR Week`<-playerleftweek$`VHSR So Far`/playerleftweek$`VHSR Target Week`
+playerleftweek$Position <- factor(playerleftweek$Position, levels = c("FR","SR","BR","HB","CC","OB"))
+playerleftweek <- playerleftweek[order(playerleftweek$Position), ]
+playerleftweek$Initials <- sapply(strsplit(playerleftweek$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+
+
+playerleftweek <- playerleftweek %>%
+  mutate(
+    HMLD_Color = case_when(
+      `% of HMLD Week` > 0.85 ~ "darkgreen",
+      `% of HMLD Week` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorHMLD = as.factor(Name)  # for legend control
+  )
+
+playerleftweek <- playerleftweek %>%
+  mutate(
+    VHSR_Color = case_when(
+      `% of VHSR Week` > 0.85 ~ "darkgreen",
+      `% of VHSR Week` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorVHSR = as.factor(Name)  # for legend control
+  )
+a <- ggplot(playerleftweek, aes(x = Position, y = `HMLD Target Week`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorHMLD), 
+    vjust = -0.5,
+    y = playerleftweek$`HMLD So Far`,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(playerleftweek$HMLD_Color, playerleftweek$NameFactorHMLD)
+  ) +
+  
+  xlab("") +coord_cartesian(
+  ylim=c(min(min(playerleftweek$`HMLD So Far`), min(playerleftweek$`HMLD Target Week`)),max(max(playerleftweek$`HMLD So Far`), max(playerleftweek$`HMLD Target Week`))))+
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+
+b1 <- ggplotly(a, tooltip = c("Name", "Position", "HMLD Target Week","HMLD So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "HMLD Target Week"))
+
+a <- ggplot(playerleftweek, aes(x = Position, y = `VHSR Target Week`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorVHSR), 
+    vjust = -0.5,
+    y = playerleftweek$`VHSR So Far`,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(playerleftweek$VHSR_Color, playerleftweek$NameFactorVHSR)
+  ) +
+  
+  xlab("") +coord_cartesian(
+  ylim=c(min(min(playerleftweek$`VHSR So Far`), min(playerleftweek$`VHSR Target Week`)),max(max(playerleftweek$`VHSR So Far`), max(playerleftweek$`VHSR Target Week`))))+
+
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+
+b2 <- ggplotly(a, tooltip = c("Name", "Position", "VHSR Target Week","VHSR So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "VHSR Target Week"))
+
+# Combine the plots into a single Plotly object
+combined_plotsg <- subplot(b1,b2, nrows=1, shareX = FALSE, shareY = FALSE,titleY = TRUE,margin=0.05)
+
+# Customize legend settings
+combined_plotsg <- combined_plotsg %>% layout(
+  legend = list(
+    traceorder = "normal",  # Ensure the order of legend items is consistent
+    font = list(color = "black"),  # Customize legend font color
+    bgcolor = "white",  # Set legend background color
+    bordercolor = "white",  # Set legend border color
+    borderwidth = 1  # Set legend border width
+  )
+)
+
+# Display the combined plot for session compared to game 
+combined_plotsg
+```
+### Weekly Targets So far ####
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+
+
+playerleftweek <- playerleftweek %>%
+  mutate(
+    HMLD_Color = case_when(
+      `% of HMLD So Far` > 0.85 ~ "darkgreen",
+      `% of HMLD So Far` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorHMLD = as.factor(Name)  # for legend control
+  )
+
+playerleftweek <- playerleftweek %>%
+  mutate(
+    VHSR_Color = case_when(
+      `% of VHSR So Far` > 0.85 ~ "darkgreen",
+      `% of VHSR So Far` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorVHSR = as.factor(Name)  # for legend control
+  )
+a <- ggplot(playerleftweek, aes(x = Position, y = `HMLD Target So Far`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorHMLD), 
+    vjust = -0.5,
+    y = playerleftweek$`HMLD So Far`,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(playerleftweek$HMLD_Color, playerleftweek$NameFactorHMLD)
+  ) +
+  
+  xlab("") +coord_cartesian(
+  ylim=c( min(min(playerleftweek$`HMLD So Far`), min(playerleftweek$`HMLD Target So Far`)), max(max(playerleftweek$`HMLD So Far`), max(playerleftweek$`HMLD Target So Far`))))+
+
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+b1 <- ggplotly(a, tooltip = c("Name", "Position", "HMLD Target So Far","HMLD So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "HMLD Target So Far"))
+
+a <- ggplot(playerleftweek, aes(x = Position, y = `VHSR Target So Far`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorVHSR), 
+    vjust = -0.5,
+    y = playerleftweek$`VHSR So Far`,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(playerleftweek$VHSR_Color, playerleftweek$NameFactorVHSR)
+  ) +
+  
+  xlab("") +coord_cartesian(
+  ylim=c(min(min(playerleftweek$`VHSR So Far`), min(playerleftweek$`VHSR Target So Far`)), max(max(playerleftweek$`VHSR So Far`), max(playerleftweek$`VHSR Target So Far`))))+
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+b2 <- ggplotly(a, tooltip = c("Name", "Position", "VHSR Target So Far","VHSR So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "VHSR Target So Far"))
+
+# Combine the plots into a single Plotly object
+combined_plotsg <- subplot(b1,b2, nrows=1, shareX = FALSE, shareY = FALSE,titleY = TRUE,margin=0.05)
+
+# Customize legend settings
+combined_plotsg <- combined_plotsg %>% layout(
+  legend = list(
+    traceorder = "normal",  # Ensure the order of legend items is consistent
+    font = list(color = "black"),  # Customize legend font color
+    bgcolor = "white",  # Set legend background color
+    bordercolor = "white",  # Set legend border color
+    borderwidth = 1  # Set legend border width
+  )
+)
+
+# Display the combined plot for session compared to game 
+combined_plotsg
+```
+
+### Daily Target ####
+
+Daily targets columns are averaged on position, as these will change day to day unlike the specific targets for the week. 
+```{r, echo=FALSE,message=FALSE,warning=FALSE, out.width="125%",out.height="125%"}
+setwd("targetsheetlocation")
+todaysthresholds<-read_xlsx(paste0("Import Template ",Sys.Date(),".xlsx"),sheet=1)
+trainingtotalsum<-trainingtotal %>%
+  group_by(Name)%>%
+  dplyr::summarise(HMLD=sum(HMLD),`VHSR >70%`=sum(`VHSR >70%`),Position=Position)
+trainingtotalsum<-unique(trainingtotalsum)
+trainingtotalsum$Initials <- sapply(strsplit(trainingtotalsum$Name, " "), function(x) paste0(substr(x, 1, 1), collapse = ""))
+todaysthresholds<-merge(trainingtotalsum,todaysthresholds,by.x = "Name",by.y = "Player")
+
+todaysthresholds$`% of HMLD Today`<-todaysthresholds$HMLD/todaysthresholds$`hml distance`
+todaysthresholds$`% of VHSR Today`<-todaysthresholds$`VHSR >70%`/todaysthresholds$`high speed running (relative)`
+colnames(todaysthresholds)[colnames(todaysthresholds) == "hml distance"] <- "HMLD Daily Target"
+colnames(todaysthresholds)[colnames(todaysthresholds) == "high speed running (relative)"] <- "VHSR Daily Target"
+
+
+todaysthresholds <- todaysthresholds %>%
+  mutate(
+    HMLD_Color = case_when(
+      `% of HMLD Today` > 0.85 ~ "darkgreen",
+      `% of HMLD Today` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorHMLD = as.factor(Name)  # for legend control
+  )
+
+todaysthresholds <- todaysthresholds %>%
+  mutate(
+    VHSR_Color = case_when(
+      `% of VHSR Today` > 0.85 ~ "darkgreen",
+      `% of VHSR Today` >= 0.60 ~ "lightblue",
+      TRUE ~ "orange"
+    ),
+    NameFactorVHSR = as.factor(Name)  # for legend control
+  )
+a <- ggplot(todaysthresholds, aes(x = Position, y = `HMLD Daily Target`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorHMLD), 
+    vjust = -0.5,
+    y = todaysthresholds$HMLD,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(todaysthresholds$HMLD_Color, todaysthresholds$NameFactorHMLD)
+  ) +
+  
+  xlab("") +coord_cartesian(
+    ylim=c(min(min(todaysthresholds$`HMLD`), min(todaysthresholds$`HMLD Daily Target`)), max(max(todaysthresholds$`HMLD`), max(todaysthresholds$`HMLD Daily Target`))))+
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+b1 <- ggplotly(a, tooltip = c("Name", "Position", "HMLD Daily Target","HMLD So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "HMLD Daily Target"))
+
+
+a <- ggplot(todaysthresholds, aes(x = Position, y = `VHSR Daily Target`)) +
+  geom_bar(stat = "summary", position = "dodge", fun = round_mean, fill = "black") +
+  
+  # Map legend color to Name (not performance), but text color to performance
+  geom_text(
+    aes(label = Initials, color = NameFactorVHSR), 
+    vjust = -0.5,
+    y = todaysthresholds$`VHSR >70%`,
+    show.legend = TRUE
+  ) +
+  
+  # Assign colors manually based on HMLD_Color
+  scale_color_manual(
+    values = setNames(todaysthresholds$VHSR_Color, todaysthresholds$NameFactorVHSR)
+  ) +
+  
+  xlab("") +coord_cartesian(
+    ylim=c(min(min(todaysthresholds$`VHSR`), min(todaysthresholds$`VHSR Daily Target`)), max(max(todaysthresholds$`VHSR >70%`), max(todaysthresholds$`VHSR Daily Target`))))+
+  
+  theme(
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    text = element_text(size = 16)
+  )
+b2 <- ggplotly(a, tooltip = c("Name", "Position", "VHSR Daily Target","VHSR So Far")) %>%
+  layout(legend = list(title = list(text = NULL)),
+         hovermode = "closest",
+         hoverlabel = list(font = list(color = "white")),
+         pointmeta = list(text = "VHSR Daily Target"))
+# Combine the plots into a single Plotly object
+combined_plotsg <- subplot(b1,b2, nrows=1, shareX = FALSE, shareY = FALSE,titleY = TRUE,margin=0.05)
+
+# Customize legend settings
+combined_plotsg <- combined_plotsg %>% layout(
+  legend = list(
+    traceorder = "normal",  # Ensure the order of legend items is consistent
+    font = list(color = "black"),  # Customize legend font color
+    bgcolor = "white",  # Set legend background color
+    bordercolor = "white",  # Set legend border color
+    borderwidth = 1  # Set legend border width
+  )
+)
+
+# Display the combined plot for session compared to game 
+combined_plotsg
+
+weeklylloads<- week %>%
+  group_by(Position)%>%
+  dplyr::summarise(hmldsum=sum(HMLD)+900,vhsr=sum(VHSR)) ### add 900
+playersleftweek<-merge(playersleft,weeklylloads,by.x = "Position",by.y = "Position")
+playersleftweek<-playersleftweek[,c(4,1,5,6,2,3,11,12)]
+
+colnames(playersleftweek)<-c("Name","Position","HMLD So Far","VHSR So Far","HMLD Target So Far","VHSR Target So Far","HMLD Target Week","VHSR Target Week")
+playersleftweek$`% of HMLD So Far`<-round(playersleftweek$`HMLD So Far`/(playersleftweek$`HMLD Target So Far`),digits=2)
+playersleftweek$`% of VHSR So Far`<-round(playersleftweek$`VHSR So Far`/playersleftweek$`VHSR Target So Far`,digits=2)
+playersleftweek$`% of HMLD Week`<-round(playersleftweek$`HMLD So Far`/(playersleftweek$`HMLD Target Week`)+900,digits=2) ### add 900
+playersleftweek$`% of VHSR Week`<-round(playersleftweek$`VHSR So Far`/playersleftweek$`VHSR Target Week`,digits=2)
+playersleftweek$`HMLD Target Week`<-playersleftweek$`HMLD Target Week`
+playersleftweek$Position <- factor(playersleftweek$Position, levels = c("FR","SR","BR","HB","CC","OB"))
+playersleftweek <- playersleftweek[order(playersleftweek$Position), ]
+setwd("Outputlocationforanalysisoftargets")
+write.csv(playersleftweek, paste0("MidweekTotal ",format(Sys.Date(), "%Y-%m-%d"), ".csv"))
+
+```
